@@ -82,7 +82,7 @@ All runs used an Apple M5 Max (PyTorch MPS backend), in bf16.
 
 ## Checkpoints and corpus
 
-The checkpoints are not in git. They are on the Hugging Face Hub, in private repositories:
+The checkpoints are not in git. They are on the Hugging Face Hub, in public repositories:
 - pre-trained model: https://huggingface.co/dmilanko/code-review-t5-pretrain
 - condition A (no pre-training), selected checkpoint: https://huggingface.co/dmilanko/code-review-t5-nopt
 - condition B (pre-training), selected checkpoint: https://huggingface.co/dmilanko/code-review-t5-pt
