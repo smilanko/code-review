@@ -30,6 +30,9 @@ MIN_TOKENS, MAX_TOKENS, HELDOUT, SEED = 10, 512, 0.01, 680
 PREFIX = {"code-and-comment-to-code": "code&comment2code: ", "code-to-comment": "code2comment: "}
 
 
+# Summary of a list of token lengths. p50 is the median (half are shorter), p90 means 90% are
+# shorter. E.g. code2comment targets (the reviewer comments), train split:
+#     p50 18, p90 52, max 478, over_512 0
 def dist(lengths):
     a = np.asarray(lengths)
     return {"n": int(a.size), "mean": round(float(a.mean()), 1),
@@ -37,6 +40,7 @@ def dist(lengths):
             "over_512": int((a > MAX_TOKENS).sum()), "over_512_pct": round(100 * float((a > MAX_TOKENS).mean()), 2)}
 
 
+# token count of each text (</s> included), tokenized in batches of 2,000
 def lengths(tok, texts):
     out = []
     for i in range(0, len(texts), 2000):
@@ -48,6 +52,10 @@ def main():
     tok = PreTrainedTokenizerFast.from_pretrained(ROOT / "tokenizer")
     recs = [json.loads(l) for l in gzip.open(DATA / "corpus/instances.jsonl.gz", "rt", encoding="utf-8")]
     lens = lengths(tok, [r["text"] for r in recs])
+    # The assignment's length rule: keep instances of 10 to 512 tokens (</s> included). Too short:
+    # mostly commit messages such as "Exclude BlueMapAPI from spotless" (7 tokens). Too long: mostly
+    # review threads with long diff hunks. Long ones are dropped, not cut: cutting a review thread
+    # would remove the comment at its end.
     removed = Counter()
     kept = []
     for r, n in zip(recs, lens):
@@ -59,6 +67,7 @@ def main():
             r["tokens"] = n; kept.append(r)
 
     rng = random.Random(SEED)
+    # shuffle with a fixed seed, then the first 1% is the held-out split
     rng.shuffle(kept)
     n_held = round(HELDOUT * len(kept))
     for name, part in (("heldout", kept[:n_held]), ("train", kept[n_held:])):
@@ -66,6 +75,7 @@ def main():
             for r in part:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
+    # source mix of the final corpus, by instances and by tokens
     by_src = Counter(r["source"] for r in kept)
     tokens_by_src = Counter()
     for r in kept:
@@ -80,6 +90,7 @@ def main():
         "corpus_length_before_filter": dist(lens),
         "finetuning": {},
     }
+    # the same length statistics for each fine-tuning task and split (inputs with their prefix)
     for task, prefix in PREFIX.items():
         for split in ("train", "val", "test"):
             rows = [l.rstrip("\n").split("\t", 1) for l in open(FT / task / f"{split}.tsv", encoding="utf-8")]

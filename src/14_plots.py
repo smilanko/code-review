@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 import matplotlib
+# draw to files only, no window
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
@@ -22,11 +23,13 @@ RUNS = DATA / "checkpoints"
 OUT = ROOT / "results"
 
 
+# a CSV log -> {column: list of numbers}
 def read(path):
     rows = list(csv.DictReader(open(path)))
     return {k: [float(r[k]) for r in rows] for k in rows[0]} if rows else {}
 
 
+# save each figure as PNG (to view) and PDF (for the LaTeX write-up)
 def save(fig, name):
     fig.tight_layout()
     for ext in ("png", "pdf"):
@@ -36,6 +39,7 @@ def save(fig, name):
 
 
 def pretrain():
+    # left: training and held-out loss; right: held-out masked-token accuracy
     tr, ev = read(RUNS / "pretrain/train_log.csv"), read(RUNS / "pretrain/eval_log.csv")
     fig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.4))
     a.plot(tr["step"], tr["loss"], label="training (mean of 50 steps)", lw=1)
@@ -50,11 +54,14 @@ def pretrain():
 
 
 def finetune():
+    # only the runs that have a validation log so far
     runs = {c: RUNS / f"finetune-{c}" for c in ("nopt", "pt") if (RUNS / f"finetune-{c}/val_log.csv").exists()}
     if not runs:
         return
     names = {"nopt": "A: no pre-training", "pt": "B: pre-training"}
     fig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.4))
+    # One colour per condition (A blue, B orange). On the right, solid lines are code&comment2code and
+# dashed lines code2comment, which stays at 0% for both runs.
     for i, (c, d) in enumerate(runs.items()):
         tr, va = read(d / "train_log.csv"), read(d / "val_log.csv")
         a.plot(tr["step"], tr["loss"], color=f"C{i}", lw=1, label=names[c])

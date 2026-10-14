@@ -29,18 +29,24 @@ LENGTH = "assignment rule: 10 to 512 tokens under our tokenizer"
 
 
 def main():
+    # the counts each earlier step saved
     d4 = json.loads((C / "04_dedup.json").read_text())
     d5 = json.loads((C / "05_filter.json").read_text())
     d6 = json.loads((C / "06_decontaminate.json").read_text())
     d7 = json.loads((C / "07_tokenizer.json").read_text())
     d8 = json.loads((C / "08_length_and_stats.json").read_text())
 
+    # One row per step, per source, in the order the steps ran. Removal rows are negative; rows starting
+# with "=" are running totals. E.g. for methods:
+#     Collected 584,610 | Duplicate repositories -16,076 | Exact duplicates -69,759 |
+#     Near duplicates -19,722 | = Deduplicated 479,053
     rows = [("Collected", "", {s: d4[s]["collected"] for s in SOURCES})]
     rows.append(("Duplicate repositories", "same project listed twice by GHS (old and new name)",
                  {s: -d4[s]["alias_removed"] for s in SOURCES}))
     rows.append(("Exact duplicates", "identical token sequence", {s: -d4[s]["exact_removed"] for s in SOURCES}))
     rows.append(("Near duplicates", "Jaccard >= 0.8 on token 3-grams", {s: -d4[s]["near_removed"] for s in SOURCES}))
     rows.append(("= Deduplicated", "", {s: d4[s]["out"] for s in SOURCES}))
+    # every filter name in the step-5 counts must have a reason above
     names = {name for src in SOURCES for name in d5[src]["removed"]}
     assert names <= FILTERS.keys(), names - FILTERS.keys()
     for name, why in FILTERS.items():
@@ -56,7 +62,7 @@ def main():
     rows.append(("Over 512 tokens", LENGTH, {s: -lf.get(f"{s}/over 512 tokens", 0) for s in SOURCES}))
     rows.append(("= Final", "", {s: d8["mix_instances"][s]["n"] for s in SOURCES}))
 
-    # the arithmetic must close at every "=" row
+    # the arithmetic must close: replay the subtractions; each "=" row must equal the running sum
     running = dict(rows[0][2])
     for label, _, vals in rows[1:]:
         if label.startswith("="):
@@ -64,6 +70,7 @@ def main():
         else:
             running = {s: running[s] + vals[s] for s in SOURCES}
 
+    # write the table as Markdown, totals in bold
     lines = ["| Step | Reason | " + " | ".join(NAMES[s] for s in SOURCES) + " | Total |",
              "| --- | --- | " + " | ".join("---:" for _ in SOURCES) + " | ---: |"]
     for label, why, vals in rows:

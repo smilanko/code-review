@@ -35,39 +35,61 @@ RAW_LENGTH, INPUT_LENGTH, TARGET_LENGTH = 568, 512, 114
 EOS, SENTINEL_0 = 1, 32099          # <extra_id_0> = 32099, <extra_id_1> = 32098, ...
 
 
+# Which tokens to hide. For our 568-token chunks: 85 tokens (15%) hidden in 28 spans (mean length 3).
+# The 483 kept tokens are also cut into 28 runs, and the two alternate: kept, hidden, kept, hidden ...
+# Span lengths are random, so each chunk is masked differently every time it is used.
 def random_spans_noise_mask(length, rng, noise_density=NOISE_DENSITY, mean_span=MEAN_SPAN):
     """Boolean mask of `length`: True = hidden. Alternates kept and hidden spans, starting with kept."""
+    # how many tokens to hide (15%) and in how many spans (mean length 3)
     num_noise = min(max(int(np.round(length * noise_density)), 1), length - 1)
     num_spans = max(int(np.round(num_noise / mean_span)), 1)
     num_kept = length - num_noise
 
     def segment(num_items, num_segments):
         """Random split of num_items into num_segments non-empty parts; returns their lengths."""
+        # choose num_segments - 1 random cut points among the items
         first = np.arange(num_items - 1) < (num_segments - 1)
         rng.shuffle(first)
         segment_id = np.cumsum(np.pad(first, [[1, 0]]))
         return np.unique(segment_id, return_counts=True)[1]
 
+    # interleave span lengths: kept, hidden, kept, hidden, ...
     spans = np.stack([segment(num_kept, num_spans), segment(num_noise, num_spans)], axis=1).reshape(-1)
+    # mark where each span starts; odd-numbered spans are the hidden ones
     starts = np.zeros(length, dtype=np.int8)
     starts[np.cumsum(spans)[:-1]] = 1
     return np.cumsum(starts) % 2 == 1
 
 
+# Turn a chunk into a training pair. A real example (a 39-token method, 2 spans hidden):
+#
+#     text    /** Returns the larger of two numbers, ... */ public static int max(int a, int b)
+#             { if (a >= b) { return a; } return b; }
+#     input   ... public static int max<extra_id_0> { if (a >= b) { return a; } return<extra_id_1></s>
+#     target  <extra_id_0>(int a, int b)<extra_id_1> b; }</s>
+#
+# The model reads the input and must produce the target: each sentinel followed by what it hides.
 def corrupt(chunk, rng):
     """One chunk of token ids -> (input_ids, labels), as numpy arrays."""
     mask = random_spans_noise_mask(len(chunk), rng)
     starts = mask & ~np.concatenate([[False], mask[:-1]])        # first token of each hidden span
+    # span k gets sentinel <extra_id_k>, whose id is 32099 - k
     sentinel = SENTINEL_0 - (np.cumsum(starts) - 1)              # sentinel of the span a position is in
+    # input: kept tokens, and each hidden span collapsed to its sentinel
     keep = ~mask | starts                                        # kept tokens, and one slot per span
     input_ids = np.append(np.where(starts, sentinel, chunk)[keep], EOS)
+    # target: each sentinel followed by the tokens it hides
     hidden, first = chunk[mask], starts[mask]
     labels = np.append(np.insert(hidden, np.flatnonzero(first), sentinel[starts]), EOS)
     return input_ids, labels
 
 
+# Instances are short (median 42 tokens), so they are packed end to end, each ending in </s>, and
+# cut into 568-token chunks. No compute is spent on padding, as in T5:
+#     [method</s> commit</s> review thread</s> method</s> ...]  ->  rows of 568 tokens
 def pack(token_lists, length=RAW_LENGTH):
     """Join token lists into one stream and cut it into rows of `length`; the remainder is dropped."""
+    # all token ids end to end, as 16-bit integers (our ids fit below 65,536)
     stream = np.fromiter((t for ids in token_lists for t in ids), dtype=np.uint16)
     n = len(stream) // length
     return stream[:n * length].reshape(n, length)

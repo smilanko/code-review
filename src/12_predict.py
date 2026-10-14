@@ -30,6 +30,7 @@ from transformers import PreTrainedTokenizerFast, T5ForConditionalGeneration
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("DATA", ROOT.parent / "data.nosync"))   # .nosync: keep iCloud out of it
+# reuse the fine-tuning script's settings and helpers, so decoding is identical
 spec = importlib.util.spec_from_file_location("finetune", ROOT / "src/11_finetune.py")
 ft = importlib.util.module_from_spec(spec); spec.loader.exec_module(ft)
 TASK_NAMES = {"code-and-comment-to-code": "code&comment2code", "code-to-comment": "code2comment"}
@@ -49,21 +50,34 @@ def predict(model, tok, rows, condition):
         x = tok([rows[j][1] for j in part], truncation=True, max_length=ft.MAX_LENGTH, padding=True,
                 return_tensors="pt").to(ft.DEVICE)
         with torch.autocast(ft.DEVICE, dtype=torch.bfloat16):
+            # greedy decoding, exactly as in validation
             seqs = model.generate(**x, num_beams=1, do_sample=False, max_new_tokens=ft.MAX_LENGTH)
         y = seqs[:, 1:]                                                  # drop the decoder start token
+        # Positions after the first </s> are padding (a batch is as long as its longest output),
+        # not part of the prediction, so they are left out of the score.
         after_eos = torch.cumsum((y == tok.eos_token_id).int(), 1) - (y == tok.eos_token_id).int() > 0
         labels = y.masked_fill(after_eos, -100)
+        # score: feed the generated tokens back in, in fp32, and read each token's probability
         logits = model(**x, labels=labels).logits.float()
         logp = torch.log_softmax(logits, -1).gather(-1, y.unsqueeze(-1)).squeeze(-1)
+        # Sequence probability = the product of the token probabilities (computed as a sum of logs),
+        # not length-normalized. A real prediction of model B:
+        #     "This is not a good practice."  tokens  ▁This ▁is ▁not ▁a ▁good ▁practice . </s>
+        #                                     probs   0.10  0.20 0.21 0.13 0.19 0.15    0.32 0.18
+        #     product = 0.0000009 (score 0.00009 on the 0-100 scale)
+        # Even fairly likely tokens multiply to a tiny number, which is why every code2comment
+        # prediction lands in the lowest confidence bucket.
         p = torch.exp((logp * ~after_eos).sum(-1)).tolist()
         for j, text, q in zip(part, tok.batch_decode(seqs, skip_special_tokens=True), p):
             preds[j], probs[j] = text, q
         ft.free_gpu_cache()                                              # varying shapes: see 11_finetune.py
     return [{"task": TASK_NAMES[k], "condition": condition, "input": s, "expected": t, "predicted": pr,
+             # the columns the assignment requires; score on a 0-100 scale
              "correct": str(ft.normalize(pr) == ft.normalize(t)).lower(), "score": f"{100 * q:.6g}"}
             for (k, s, t), pr, q in zip(rows, preds, probs)]
 
 
+# CSV with every field quoted: code contains commas and quotes
 def write(path, records, append):
     new = not (append and path.exists())
     with open(path, "a" if append else "w", newline="", encoding="utf-8") as f:
@@ -81,6 +95,7 @@ def main():
     args = ap.parse_args()
     ckpt = Path(args.checkpoint or DATA / f"checkpoints/finetune-{args.condition}/best")
     tok = PreTrainedTokenizerFast.from_pretrained(ROOT / "tokenizer")
+    # the run's selected (best) checkpoint
     model = T5ForConditionalGeneration.from_pretrained(ckpt).to(ft.DEVICE)
     out = ROOT / "results"
     out.mkdir(exist_ok=True)
@@ -93,6 +108,7 @@ def main():
         task_rows = [r for r in val_all if r[0] == task]
         val += [task_rows[i] for i in sorted(rng.choice(len(task_rows), ft.VAL_PER_TASK, replace=False))]
     test = ft.read_split("test")
+    # --limit: only the first N per task, for quick tests
     if args.limit:
         val = [r for t in ft.TASKS for r in [x for x in val if x[0] == t][:args.limit]]
         test = [r for t in ft.TASKS for r in [x for x in test if x[0] == t][:args.limit]]

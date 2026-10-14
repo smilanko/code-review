@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RES = ROOT / "results"
 TASKS = ["code&comment2code", "code2comment"]
 SEED = 680
+# some predictions are long code; lift the CSV field-size limit
 csv.field_size_limit(sys.maxsize)
 
 
@@ -45,6 +46,9 @@ def load(path):
     return list(csv.DictReader(open(path, encoding="utf-8", newline="")))
 
 
+# Ten confidence buckets by score: [0, 0.1), [0.1, 0.2), ..., [0.9, 1]. For each, how many predictions
+# fall in it and what share is exactly right. A useful score has exact match rising bucket by bucket;
+# for model B on code&comment2code it rose from 0.7% in [0, 0.1) to 32.3% in [0.8, 0.9).
 def buckets(rows):
     out = []
     for b in range(10):
@@ -56,6 +60,9 @@ def buckets(rows):
     return out
 
 
+# For each threshold t = 0.1 ... 0.9: if we only showed a developer the predictions scoring >= t,
+# how many would they see (coverage) and how many of those are right? E.g. model B, test set:
+#     t = 0.7  ->  128 predictions shown (2.6%), 19.5% of them exactly right (vs 2.9% overall)
 def thresholds(rows):
     out = []
     for t in [i / 10 for i in range(1, 10)]:
@@ -68,12 +75,17 @@ def thresholds(rows):
 
 def mcnemar(rows_nopt, rows_pt):
     """Exact two-sided McNemar test on paired predictions (aligned by input)."""
+    # McNemar's test: did pre-training make a difference? Pair A's and B's predictions by input.
+    # Pairs where both are right or both are wrong say nothing; only disagreements count. On
+    # code&comment2code: only B right 104 times, only A right 27 times. If the two models were
+    # equally good, such a lopsided split would happen with probability p = 7e-12.
     a = {r["input"]: r["correct"] == "true" for r in rows_nopt}
     b = {r["input"]: r["correct"] == "true" for r in rows_pt}
     assert a.keys() == b.keys()
     only_pt = sum(b[k] and not a[k] for k in a)
     only_nopt = sum(a[k] and not b[k] for k in a)
     n, k = only_pt + only_nopt, min(only_pt, only_nopt)
+    # exact binomial test: how likely such a split is if both models were equally good
     p = min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n) if n else 1.0
     return {"only_pt_correct": only_pt, "only_nopt_correct": only_nopt, "p_value": p,
             "odds_ratio_pt_vs_nopt": round(only_pt / only_nopt, 2) if only_nopt else None}
@@ -85,6 +97,7 @@ def main():
     args = ap.parse_args()
     test = load(RES / "predictions.csv")
     for r in test:
+        # recheck every 'correct' value from step 12
         assert (normalize(r["predicted"]) == normalize(r["expected"])) == (r["correct"] == "true"), r["input"][:80]
     conditions = sorted({r["condition"] for r in test})
     metrics, md = {}, ["# Test results\n"]
@@ -100,15 +113,18 @@ def main():
             preds, refs = [r["predicted"] for r in rows], [r["expected"] for r in rows]
             if task == "code2comment":
                 import sacrebleu
+                # code2comment: corpus-level BLEU-4 with sacreBLEU's default settings
                 bleu = sacrebleu.BLEU()
                 m["bleu4"] = round(bleu.corpus_score(preds, [refs]).score, 2)
                 m["bleu_signature"] = str(bleu.get_signature())
             else:
                 from codebleu import calc_codebleu
+                # code&comment2code: CodeBLEU with the default weights
                 cb = calc_codebleu(refs, preds, lang="java")
                 m["codebleu"] = {k: round(100 * v, 2) for k, v in cb.items()}
             m["buckets"] = buckets(rows)
             m["thresholds_test"] = thresholds(rows)
+            # the threshold is chosen on validation and reported on test
             m["thresholds_val"] = thresholds([r for r in val if r["task"] == task])
             metrics[f"{task}/{cond}"] = m
             md += [f"## {task} · {cond}\n",
@@ -126,6 +142,7 @@ def main():
                 md.append(f"| ≥ {t['threshold']:.1f} | {v.get('coverage_pct', '')}% | {v.get('exact_match_pct') if v.get('exact_match_pct') is not None else '—'}{'%' if v.get('exact_match_pct') is not None else ''} | "
                           f"{t['n']:,} ({t['coverage_pct']}%) | {t['exact_match_pct'] if t['exact_match_pct'] is not None else '—'}{'%' if t['exact_match_pct'] is not None else ''} |")
             md.append("")
+    # with both conditions present, test whether pre-training made a difference
     if set(conditions) >= {"nopt", "pt"}:
         md += ["## Pre-training effect (McNemar's exact test, test set)\n",
                "| Task | Only B correct | Only A correct | p-value | Odds ratio B/A |", "| --- | ---: | ---: | ---: | ---: |"]
@@ -140,6 +157,7 @@ def main():
     print("\n".join(md))
 
     if args.errors:
+        # --errors: draw 25 wrong predictions per task to label by hand (careful: overwrites error_analysis.csv and its labels)
         rng = random.Random(SEED)
         sample = []
         for task in TASKS:

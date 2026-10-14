@@ -91,14 +91,24 @@ GROUP = 50                                              # batches per length-sor
 PAD_MULTIPLE, EMPTY_CACHE_EVERY = 64, 10
 
 
+# Length-grouped batches. A comment target is ~18 tokens and a revised method ~300; mixed in one
+# batch, everything is padded to the longest, and 60-77% of each batch was padding. So, per pass:
+#   1. shuffle all 100k pairs (seeded)
+#   2. take groups of 50 batches' worth (1,600 pairs) and sort each group by length
+#   3. cut each group into batches of 32, so a batch holds pairs of similar length
+#   4. shuffle the order of the batches
+# Every pair is still used once per pass, the order depends only on the seed, and A and B see the
+# same batches.
 def epoch_batches(lengths, epoch, _cache={}):
     """The batches (lists of pair indices) of one pass, length-grouped; depend only on (SEED, epoch)."""
     if epoch not in _cache:
+        # shuffle all 100k pairs (seeded), then sort each group of 50 batches by length
         order = np.random.default_rng([SEED, epoch]).permutation(len(lengths))
         batches = []
         for g in range(0, len(order), GROUP * BATCH):
             group = sorted(order[g:g + GROUP * BATCH], key=lambda j: lengths[j])
             batches += [group[i:i + BATCH] for i in range(0, len(group) - BATCH + 1, BATCH)]
+        # shuffle the batch order, so long and short batches alternate
         np.random.default_rng([SEED, epoch, 1]).shuffle(batches)
         _cache.clear(); _cache[epoch] = batches
     return _cache[epoch]
@@ -106,10 +116,14 @@ def epoch_batches(lengths, epoch, _cache={}):
 
 def batch_for(x_ids, y_ids, step):
     """The BATCH training pairs of a given step, padded; depends only on (SEED, step)."""
+    # total length of each pair (input + target) decides its batch
     lengths = [len(x) + len(y) for x, y in zip(x_ids, y_ids)]
     per_epoch = len(x_ids) // BATCH
     epoch, i = divmod(step, per_epoch)
     idx = epoch_batches(lengths, epoch)[i]
+    # Pad to a common width, rounded up to a multiple of 64 (18 -> 64, 65 -> 128, 300 -> 320), so
+    # there are only 8 possible widths; each new shape made the GPU memory cache grow.
+    # Padding is 0 in inputs (masked out of attention) and -100 in labels (ignored by the loss).
     def pad(seqs, value):
         width = -(-max(map(len, seqs)) // PAD_MULTIPLE) * PAD_MULTIPLE    # round up: few distinct shapes
         out = torch.full((len(seqs), width), value)
@@ -123,6 +137,7 @@ def batch_for(x_ids, y_ids, step):
 def generate(model, tok, sources):
     """Greedy decoding (beam width 1) of every source; returns the decoded predictions in order."""
     model.eval()
+    # decode in length order to save padding; results go back in the original order
     order = sorted(range(len(sources)), key=lambda i: len(sources[i]))   # similar lengths batch together
     preds = [None] * len(sources)
     for i in range(0, len(order), GEN_BATCH):
@@ -130,6 +145,7 @@ def generate(model, tok, sources):
         enc = tok([sources[j] for j in part], truncation=True, max_length=MAX_LENGTH, padding=True,
                   return_tensors="pt").to(DEVICE)
         with torch.autocast(DEVICE, dtype=torch.bfloat16):
+            # greedy: at each step take the most likely token
             out = model.generate(**enc, num_beams=1, do_sample=False, max_new_tokens=MAX_LENGTH)
         for j, text in zip(part, tok.batch_decode(out, skip_special_tokens=True)):
             preds[j] = text
@@ -160,16 +176,24 @@ def validate(model, tok, val):
     preds = generate(model, tok, [s for _, s, _ in val])
     em = {}
     for task in TASKS:
+        # exact match: equal after collapsing whitespace
         hits = [normalize(p) == normalize(t) for p, (k, _, t) in zip(preds, val) if k == task]
         em[task] = sum(hits) / len(hits)
     return em, sum(em.values()) / len(em), validation_loss(model, tok, val)
 
 
+# Is this validation check an improvement? Exact match first, validation loss to break ties:
+#     mean exact match 1.45%, loss 1.20  vs best 1.45%, 1.21  ->  better (tie, lower loss)
+#     mean exact match 1.40%, loss 1.10  vs best 1.45%, 1.21  ->  not better (lower exact match)
+#     mean exact match 1.50%, loss 1.30  vs best 1.45%, 1.21  ->  better (higher exact match)
+# Without the tie-break, a run from random weights stuck at 0% exact match would be stopped early
+# even while its loss was still falling.
 def better(score, loss, best):
     """Higher mean exact match wins; on a tie, lower validation loss."""
     return score > best[0] or (score == best[0] and loss < best[1])
 
 
+# give the GPU memory cache back to the system (varying batch shapes made it grow)
 def free_gpu_cache():
     if DEVICE == "mps":
         torch.mps.empty_cache()
@@ -184,6 +208,7 @@ def append_csv(path, row, header):
         w.writerow(row)
 
 
+# save a checkpoint safely: write to a temporary folder, then rename
 def save(model, tok, path, state=None):
     tmp = path.with_name(path.name + ".tmp")
     if tmp.exists():
@@ -208,9 +233,11 @@ def main():
     tok = PreTrainedTokenizerFast.from_pretrained(ROOT / "tokenizer")
 
     train = read_split("train")
+    # tokenize all training pairs once; anything over 512 tokens is truncated
     x_ids = tok([s for _, s, _ in train], truncation=True, max_length=MAX_LENGTH).input_ids
     y_ids = tok([t for _, _, t in train], truncation=True, max_length=MAX_LENGTH).input_ids
     val_all = read_split("val")
+    # the validation sample: 1,000 random pairs per task, the same for both conditions
     rng = np.random.default_rng(SEED)
     val = []
     for task in TASKS:
@@ -220,6 +247,7 @@ def main():
           f"{len(val):,} validation instances; device {DEVICE}", flush=True)
 
     torch.manual_seed(SEED)
+    # condition B starts from our pre-trained model, condition A from random weights
     if args.condition == "pt":
         model = T5ForConditionalGeneration.from_pretrained(args.init)
         assert {k: getattr(model.config, k) for k in MODEL_CONFIG} == MODEL_CONFIG, "checkpoint config differs"
@@ -227,6 +255,7 @@ def main():
         model = T5ForConditionalGeneration(T5Config(**MODEL_CONFIG))
     step, hours, best, bad_checks = 0, 0.0, (-1.0, float("inf")), 0
     last = run / "last"
+    # resume from the last validation check if the run was interrupted
     if (last / "trainer_state.pt").exists():
         model = T5ForConditionalGeneration.from_pretrained(last)
         state = torch.load(last / "trainer_state.pt", weights_only=False)
@@ -241,14 +270,17 @@ def main():
                    "val_per_task": VAL_PER_TASK, "val_every": VAL_EVERY, "patience": PATIENCE, "seed": SEED,
                    "device": DEVICE}, open(run / "run_config.json", "w"), indent=2)
     model.to(DEVICE).train()
+    # T5's fine-tuning recipe: Adafactor with parameter scaling at a constant 1e-3
     opt = Adafactor(model.parameters(), lr=LR, scale_parameter=True, relative_step=False, warmup_init=False)
     sched = get_constant_schedule(opt)
     if state:
         opt.load_state_dict(state["optimizer"]); sched.load_state_dict(state["scheduler"])
 
     t0, running = time.time(), []
+    # train until the step budget or early stopping, whichever comes first
     while step < args.max_steps and bad_checks < PATIENCE:
         x, y = batch_for(x_ids, y_ids, step)
+        # forward and backward pass; if memory runs out, empty the cache and retry the same batch once
         for attempt in (1, 2):
             try:
                 with torch.autocast(DEVICE, dtype=torch.bfloat16):
@@ -275,6 +307,9 @@ def main():
                        ["step", "loss", "lr", "hours"])
             print(f"step {step:,}  loss {np.mean(running):.3f}  {now:.2f} h", flush=True)
             running = []
+        # Every 2,000 steps: validate on the 2,000-pair sample. If better(), save the model as best/
+    # and reset the count; otherwise add one. After 3 checks in a row without improvement
+    # (6,000 steps), the loop stops: early stopping. Both A and B ran all 30,000 steps instead.
         if step % VAL_EVERY == 0 or step == args.max_steps:
             em, score, vloss = validate(model, tok, val)
             free_gpu_cache()
@@ -294,6 +329,7 @@ def main():
             save(model, tok, last, {"optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "step": step,
                                     "hours": now, "best": best, "bad_checks": bad_checks})
     hours += (time.time() - t0) / 3600
+    # summary for the write-up: where and why the run stopped, best scores, GPU-hours
     reason = "early stopping" if bad_checks >= PATIENCE else "step budget reached"
     json.dump({"stopped_at_step": step, "reason": reason, "best": json.load(open(run / "best" / "val_scores.json")),
                "gpu_hours": round(hours, 3)}, open(run / "summary.json", "w"), indent=2)

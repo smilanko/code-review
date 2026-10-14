@@ -59,10 +59,12 @@ DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is
 def packed(tok, split, shuffle):
     """Token chunks of one corpus split, cached as $DATA/pretrain_cache/<split>.npy."""
     cache = DATA / "pretrain_cache" / f"{split}.npy"
+    # tokenizing 600k instances takes minutes, so the packed chunks are cached on disk
     if cache.exists():
         return np.load(cache)
     texts = [json.loads(l)["text"] for l in gzip.open(DATA / f"corpus/{split}.jsonl.gz", "rt", encoding="utf-8")]
     if shuffle:
+        # shuffle before packing, so a chunk mixes instances from different repositories
         np.random.default_rng(SEED).shuffle(texts)
     ids = []
     for i in range(0, len(texts), 5000):
@@ -76,7 +78,13 @@ def packed(tok, split, shuffle):
 def batch_for(chunks, step):
     """The BATCH chunks of a given step and their corruption; depends only on (SEED, step)."""
     per_epoch = len(chunks) // BATCH
+    # Which batch to train on is computed from the step number alone, e.g. with 2,542 steps per pass:
+    #     step 5,000  ->  pass 1 (the second), batch 2,458 of that pass
+    # Each pass shuffles the chunks with seed (680, pass), and each batch masks them with seed
+    # (680, pass, batch). So a run resumed at step 5,000 trains on exactly the batches an
+    # uninterrupted run would have, and the results are reproducible.
     epoch, i = divmod(step, per_epoch)
+    # a fresh, seeded chunk order on every pass; masks are redrawn every time
     order = np.random.default_rng([SEED, epoch]).permutation(len(chunks))
     rng = np.random.default_rng([SEED, epoch, i])
     pairs = [corrupt(chunks[j].astype(np.int64), rng) for j in order[i * BATCH:(i + 1) * BATCH]]
@@ -87,18 +95,25 @@ def batch_for(chunks, step):
 def evaluate(model, inputs, labels, bf16=True):
     """Held-out loss (mean over all target tokens) and accuracy on the hidden tokens."""
     model.eval()
+    # Two numbers on the held-out set:
+    #   - loss: how surprised the model is by the correct target tokens (lower is better)
+    #   - accuracy: of the hidden tokens only (not sentinels or </s>), how often the model's most
+    #     likely token is the right one. A model that knew only word frequencies would score ~2%.
+    # Evaluated in batches, without gradients; dropout is off in eval mode.
     loss_sum = n_tokens = correct = n_masked = 0
     for i in range(0, len(inputs), EVAL_BATCH):
         x, y = inputs[i:i + EVAL_BATCH].to(DEVICE), labels[i:i + EVAL_BATCH].to(DEVICE)
         with torch.autocast(DEVICE, dtype=torch.bfloat16, enabled=bf16):
             out = model(input_ids=x, labels=y)
         loss_sum += out.loss.item() * y.numel(); n_tokens += y.numel()
+        # accuracy counts only the hidden tokens, not the sentinels or </s>
         m = is_masked_token(y)
         correct += (out.logits.argmax(-1)[m] == y[m]).sum().item(); n_masked += m.sum().item()
     model.train()
     return loss_sum / n_tokens, correct / n_masked
 
 
+# append one row to a CSV log, writing the header the first time
 def append_csv(path, row, header):
     new = not path.exists()
     with open(path, "a", newline="") as f:
@@ -108,6 +123,11 @@ def append_csv(path, row, header):
         w.writerow(row)
 
 
+# The optimizer. Plain AdamW stalled: after 2,000 steps it was no better than guessing by token
+# frequency. T5's weights start at very different scales (embeddings ~25x larger than attention
+# weights), and AdamW moves every weight by about the same amount, so the large ones barely changed.
+# Adafactor with parameter scaling moves each weight in proportion to its own size, as in the T5
+# paper; it fixed the stall. The other options remain for the diagnostic runs in results/diagnostics/.
 def make_optimizer(model, args):
     """(optimizer, schedule). adafactor-t5 is the T5 paper's recipe: Adafactor with parameter scaling
     (each update proportional to the weight's own RMS) and its built-in rate min(1e-2, 1/sqrt(step))."""
@@ -139,8 +159,11 @@ def main():
     run.mkdir(parents=True, exist_ok=True)
     tok = PreTrainedTokenizerFast.from_pretrained(ROOT / "tokenizer")
 
+    # the corpus as 568-token chunks: 81,349 for training, 842 held out
     train = packed(tok, "train", shuffle=True)
     held = packed(tok, "heldout", shuffle=False)
+    # The held-out set is masked once (seed 0), so every evaluation sees exactly the same inputs and
+    # the points on the curve are comparable.
     rng = np.random.default_rng(0)
     held_pairs = [corrupt(c.astype(np.int64), rng) for c in held]
     held_x = torch.tensor(np.stack([p[0] for p in held_pairs]))
@@ -148,10 +171,12 @@ def main():
     print(f"train chunks {len(train):,} ({len(train) // BATCH:,} steps per pass); held-out chunks {len(held):,}; "
           f"device {DEVICE}", flush=True)
 
+    # T5-small from random weights (seeded), never from_pretrained
     torch.manual_seed(SEED)
     model = T5ForConditionalGeneration(T5Config(**MODEL_CONFIG)).to(DEVICE)
     opt, sched = make_optimizer(model, args)
     step, hours = 0, 0.0
+    # resume: if a checkpoint with optimizer state exists, continue from it
     ckpts = sorted(run.glob("step-*"), key=lambda p: int(p.name.split("-")[1]))
     if ckpts and (ckpts[-1] / "trainer_state.pt").exists():
         last = ckpts[-1]
@@ -170,12 +195,14 @@ def main():
                    "seed": SEED, "device": DEVICE, "parameters": sum(p.numel() for p in model.parameters()),
                    "train_chunks": len(train), "heldout_chunks": len(held),
                    "input_tokens_seen": args.steps * BATCH * INPUT_LENGTH}, open(run / "run_config.json", "w"), indent=2)
+        # step-0 evaluation: the random model's loss and accuracy
         loss, acc = evaluate(model, held_x, held_y, bf16)
         append_csv(run / "eval_log.csv", [0, f"{loss:.4f}", f"{acc:.4f}", 0], ["step", "heldout_loss", "masked_acc", "hours"])
 
     model.train()
     t0, running = time.time(), []
     while step < stop:
+        # one optimizer step: forward in bf16, backward, clip gradients, update
         x, y = batch_for(train, step)
         with torch.autocast(DEVICE, dtype=torch.bfloat16, enabled=bf16):
             loss = model(input_ids=x.to(DEVICE), labels=y.to(DEVICE)).loss
@@ -184,6 +211,7 @@ def main():
         opt.step(); sched.step(); opt.zero_grad(set_to_none=True)
         step += 1
         running.append(loss.item())
+        # stop at once if the loss becomes NaN or infinite
         if not math.isfinite(running[-1]):
             raise SystemExit(f"loss is {running[-1]} at step {step}")
         now = hours + (time.time() - t0) / 3600
@@ -197,6 +225,7 @@ def main():
             append_csv(run / "eval_log.csv", [step, f"{loss_h:.4f}", f"{acc:.4f}", f"{now:.4f}"],
                        ["step", "heldout_loss", "masked_acc", "hours"])
             print(f"  held-out loss {loss_h:.3f}  masked-token accuracy {acc:.3f}", flush=True)
+        # checkpoint every 1,000 steps in Hugging Face format, with the optimizer state
         if step % SAVE_EVERY == 0 or step == stop:
             out = run / f"step-{step}"
             model.save_pretrained(out); tok.save_pretrained(out)
@@ -205,6 +234,7 @@ def main():
             for old in run.glob("step-*"):              # optimizer state only in the latest checkpoint
                 if old != out and (old / "trainer_state.pt").exists():
                     (old / "trainer_state.pt").unlink()
+    # the model after the last step, used to start condition B
     final = run / "final"
     if final.exists():
         shutil.rmtree(final)
