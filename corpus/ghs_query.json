@@ -1,0 +1,18 @@
+{
+  "endpoint": "https://seart-ghs.si.usi.ch/api/r/search",
+  "query": {
+    "language": "Java",
+    "license": "MIT License",
+    "excludeForks": "true",
+    "starsMin": 50,
+    "commitsMin": 1000,
+    "contributorsMin": 5,
+    "pullsMin": 50,
+    "codeLinesMin": 20000,
+    "codeLinesMax": 80000,
+    "commentLinesMin": 1000,
+    "committedMin": "2025-01-01"
+  },
+  "snapshot_date": "2026-10-12",
+  "repositories_returned": 155
+}

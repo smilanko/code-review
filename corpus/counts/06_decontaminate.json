@@ -1,0 +1,58 @@
+{
+  "patterns": {
+    "method": 9998,
+    "comment": 9901,
+    "revised": 9988
+  },
+  "methods": {
+    "in": 404192,
+    "code_hits": 25,
+    "removed_by_min_comment_words": {
+      "1": 371651,
+      "2": 11613,
+      "3": 2520,
+      "4": 46,
+      "5": 26,
+      "6": 25,
+      "8": 25,
+      "10": 25
+    },
+    "min_comment_words": 4,
+    "removed": 46,
+    "out": 404146
+  },
+  "commits": {
+    "in": 287688,
+    "code_hits": 0,
+    "removed_by_min_comment_words": {
+      "1": 47248,
+      "2": 918,
+      "3": 108,
+      "4": 11,
+      "5": 3,
+      "6": 1,
+      "8": 0,
+      "10": 0
+    },
+    "min_comment_words": 4,
+    "removed": 11,
+    "out": 287677
+  },
+  "reviews": {
+    "in": 73559,
+    "code_hits": 70,
+    "removed_by_min_comment_words": {
+      "1": 65093,
+      "2": 4434,
+      "3": 1261,
+      "4": 265,
+      "5": 164,
+      "6": 127,
+      "8": 108,
+      "10": 101
+    },
+    "min_comment_words": 4,
+    "removed": 265,
+    "out": 73294
+  }
+}

@@ -1,0 +1,14 @@
+# Python 3.14.5; main environment (.venv): mining, corpus, tokenizer, training, predictions, plots
+datasketch==2.0.0
+huggingface_hub==2.2.0
+matplotlib==3.11.2
+numpy==2.5.4
+pyahocorasick==2.3.1
+requests==2.34.2
+safetensors==0.8.0
+tokenizers==0.23.3
+torch==2.14.1
+transformers==5.19.0
+tree-sitter==0.26.0
+tree-sitter-java==0.23.5
+truststore==0.10.4

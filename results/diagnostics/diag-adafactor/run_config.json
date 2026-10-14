@@ -1,0 +1,19 @@
+{
+  "steps": 10000,
+  "batch": 32,
+  "input_length": 512,
+  "target_length": 114,
+  "lr": 0.005,
+  "warmup": 200,
+  "optimizer": "adafactor",
+  "weight_decay": 0,
+  "clip": 1.0,
+  "precision": "bf16",
+  "stop_at": 800,
+  "seed": 680,
+  "device": "mps",
+  "parameters": 60492288,
+  "train_chunks": 81349,
+  "heldout_chunks": 842,
+  "input_tokens_seen": 163840000
+}

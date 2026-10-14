@@ -1,0 +1,15 @@
+{
+  "instances": 765116,
+  "empty_removed": {
+    "methods": 0,
+    "commits": 1,
+    "reviews": 0
+  },
+  "model": "BPE",
+  "vocab": 32000,
+  "vocab_with_sentinels": 32100,
+  "merges": 30739,
+  "round_trip_up_to_spaces": "40000/40000",
+  "single_letter_token_share_pct": 2.2,
+  "unk_tokens_in_sample": 0
+}

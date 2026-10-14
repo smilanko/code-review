@@ -1,0 +1,246 @@
+{
+  "length_filter": {
+    "commits/over 512 tokens": 364,
+    "commits/under 10 tokens": 137388,
+    "methods/over 512 tokens": 6650,
+    "methods/under 10 tokens": 754,
+    "reviews/over 512 tokens": 14408,
+    "reviews/under 10 tokens": 2
+  },
+  "in": 765116,
+  "final": 605550,
+  "heldout": 6056,
+  "train": 599494,
+  "mix_instances": {
+    "methods": {
+      "n": 396742,
+      "pct": 65.5
+    },
+    "commits": {
+      "n": 149924,
+      "pct": 24.8
+    },
+    "reviews": {
+      "n": 58884,
+      "pct": 9.7
+    }
+  },
+  "mix_tokens": {
+    "methods": {
+      "n": 30931759,
+      "pct": 66.3
+    },
+    "commits": {
+      "n": 4136013,
+      "pct": 8.9
+    },
+    "reviews": {
+      "n": 11617088,
+      "pct": 24.9
+    }
+  },
+  "corpus_tokens_total": 46684860,
+  "corpus_length": {
+    "methods": {
+      "n": 396742,
+      "mean": 78.0,
+      "p10": 18,
+      "p50": 50,
+      "p90": 175,
+      "p99": 407,
+      "max": 512,
+      "over_512": 0,
+      "over_512_pct": 0.0
+    },
+    "commits": {
+      "n": 149924,
+      "mean": 27.6,
+      "p10": 10,
+      "p50": 15,
+      "p90": 50,
+      "p99": 243,
+      "max": 512,
+      "over_512": 0,
+      "over_512_pct": 0.0
+    },
+    "reviews": {
+      "n": 58884,
+      "mean": 197.3,
+      "p10": 64,
+      "p50": 161,
+      "p90": 392,
+      "p99": 497,
+      "max": 512,
+      "over_512": 0,
+      "over_512_pct": 0.0
+    },
+    "all": {
+      "n": 605550,
+      "mean": 77.1,
+      "p10": 13,
+      "p50": 42,
+      "p90": 192,
+      "p99": 436,
+      "max": 512,
+      "over_512": 0,
+      "over_512_pct": 0.0
+    }
+  },
+  "corpus_length_before_filter": {
+    "n": 765116,
+    "mean": 97.3,
+    "p10": 7,
+    "p50": 31,
+    "p90": 204,
+    "p99": 962,
+    "max": 255312,
+    "over_512": 21422,
+    "over_512_pct": 2.8
+  },
+  "finetuning": {
+    "code-and-comment-to-code/train": {
+      "input": {
+        "n": 50000,
+        "mean": 178.5,
+        "p10": 66,
+        "p50": 155,
+        "p90": 334,
+        "p99": 445,
+        "max": 586,
+        "over_512": 21,
+        "over_512_pct": 0.04
+      },
+      "output": {
+        "n": 50000,
+        "mean": 135.7,
+        "p10": 31,
+        "p50": 110,
+        "p90": 285,
+        "p99": 407,
+        "max": 594,
+        "over_512": 4,
+        "over_512_pct": 0.01
+      }
+    },
+    "code-and-comment-to-code/val": {
+      "input": {
+        "n": 5000,
+        "mean": 176.0,
+        "p10": 65,
+        "p50": 151,
+        "p90": 332,
+        "p99": 441,
+        "max": 531,
+        "over_512": 1,
+        "over_512_pct": 0.02
+      },
+      "output": {
+        "n": 5000,
+        "mean": 133.5,
+        "p10": 29,
+        "p50": 108,
+        "p90": 282,
+        "p99": 406,
+        "max": 513,
+        "over_512": 1,
+        "over_512_pct": 0.02
+      }
+    },
+    "code-and-comment-to-code/test": {
+      "input": {
+        "n": 5000,
+        "mean": 180.0,
+        "p10": 67,
+        "p50": 156,
+        "p90": 334,
+        "p99": 450,
+        "max": 539,
+        "over_512": 2,
+        "over_512_pct": 0.04
+      },
+      "output": {
+        "n": 5000,
+        "mean": 137.0,
+        "p10": 31,
+        "p50": 113,
+        "p90": 286,
+        "p99": 408,
+        "max": 470,
+        "over_512": 0,
+        "over_512_pct": 0.0
+      }
+    },
+    "code-to-comment/train": {
+      "input": {
+        "n": 50000,
+        "mean": 143.3,
+        "p10": 37,
+        "p50": 118,
+        "p90": 294,
+        "p99": 407,
+        "max": 558,
+        "over_512": 4,
+        "over_512_pct": 0.01
+      },
+      "output": {
+        "n": 50000,
+        "mean": 25.2,
+        "p10": 6,
+        "p50": 18,
+        "p90": 52,
+        "p99": 126,
+        "max": 478,
+        "over_512": 0,
+        "over_512_pct": 0.0
+      }
+    },
+    "code-to-comment/val": {
+      "input": {
+        "n": 5000,
+        "mean": 141.4,
+        "p10": 36,
+        "p50": 116,
+        "p90": 288,
+        "p99": 407,
+        "max": 480,
+        "over_512": 0,
+        "over_512_pct": 0.0
+      },
+      "output": {
+        "n": 5000,
+        "mean": 24.6,
+        "p10": 6,
+        "p50": 18,
+        "p90": 50,
+        "p99": 115,
+        "max": 362,
+        "over_512": 0,
+        "over_512_pct": 0.0
+      }
+    },
+    "code-to-comment/test": {
+      "input": {
+        "n": 5000,
+        "mean": 144.5,
+        "p10": 38,
+        "p50": 119,
+        "p90": 294,
+        "p99": 410,
+        "max": 461,
+        "over_512": 0,
+        "over_512_pct": 0.0
+      },
+      "output": {
+        "n": 5000,
+        "mean": 25.5,
+        "p10": 6,
+        "p50": 18,
+        "p90": 52,
+        "p99": 133,
+        "max": 383,
+        "over_512": 0,
+        "over_512_pct": 0.0
+      }
+    }
+  }
+}

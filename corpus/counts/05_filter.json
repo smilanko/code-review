@@ -1,0 +1,39 @@
+{
+  "methods": {
+    "in": 479053,
+    "removed": {
+      "trivial without Javadoc": 60528,
+      "parse errors": 277,
+      "generated": 14056
+    },
+    "modified (kept)": {
+      "comments non-English (comments removed)": 1972,
+      "javadoc non-English (doc removed)": 6378,
+      "javadoc stale (doc removed)": 134
+    },
+    "out": 404192
+  },
+  "commits": {
+    "in": 320116,
+    "removed": {
+      "AI-assisted": 2970,
+      "revert/merge": 1190,
+      "bots": 14985,
+      "non-English": 13283
+    },
+    "modified (kept)": {},
+    "out": 287688
+  },
+  "reviews": {
+    "in": 85373,
+    "removed": {
+      "non-English": 1622,
+      "per-hunk cap": 516,
+      "bots (whole thread)": 9676
+    },
+    "modified (kept)": {
+      "bots (bot replies removed)": 2610
+    },
+    "out": 73559
+  }
+}

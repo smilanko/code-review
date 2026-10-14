@@ -1,0 +1,6 @@
+# Python 3.14.5; evaluation environment (.venv-eval): only src/13_metrics.py.
+# Separate because codebleu 0.7.0 needs tree-sitter 0.22, which breaks the Java parsing of src/02_mine_git.py.
+codebleu==0.7.0
+sacrebleu==2.6.0
+tree-sitter==0.22.3
+tree-sitter-java==0.21.0

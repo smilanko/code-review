@@ -1,0 +1,31 @@
+{
+  "alias_repositories": [
+    "TeamOpenSmartGlasses/AugmentOS",
+    "kyoripowered/adventure",
+    "raiman/sikulix1"
+  ],
+  "methods": {
+    "collected": 584610,
+    "alias_removed": 16076,
+    "in": 568534,
+    "exact_removed": 69759,
+    "near_removed": 19722,
+    "out": 479053
+  },
+  "commits": {
+    "collected": 403190,
+    "alias_removed": 19592,
+    "in": 383598,
+    "exact_removed": 54329,
+    "near_removed": 9153,
+    "out": 320116
+  },
+  "reviews": {
+    "collected": 95432,
+    "alias_removed": 8034,
+    "in": 87398,
+    "exact_removed": 149,
+    "near_removed": 1876,
+    "out": 85373
+  }
+}
